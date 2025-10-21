@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lenskart AI Fitter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0a0c10; background-image: radial-gradient(circle at top right, rgba(37, 99, 235, 0.15), transparent 40%), radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.1), transparent 50%); color: #e6edf3; }
+        .fitter-card { background: rgba(13, 17, 23, 0.7); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid rgba(48, 54, 61, 0.5); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); }
+        .btn { background-image: linear-gradient(to right, #2563eb, #59a6f1); border: none; color: white; padding: 0.8rem 1.6rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.1); }
+        .btn:hover:not(:disabled) { transform: translateY(-3px) scale(1.03); box-shadow: 0 7px 20px rgba(37, 99, 235, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.1); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; }
+        .input-field { background-color: #0d1117; border: 1px solid #30363d; color: #e6edf3; transition: all 0.2s ease-in-out; }
+        .input-field:focus { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2); outline: none; }
+        input[type="file"] { display: none; }
+        .custom-file-upload { background-color: #0d1117; border: 1px solid #30363d; color: #8b949e; transition: all 0.3s ease; cursor: pointer; }
+        .custom-file-upload.selected, .custom-file-upload:hover { border-color: #2563eb; color: #e6edf3; background-color: #161b22; transform: translateY(-2px); }
+        .animated-entry { opacity: 0; transform: translateY(20px); animation: fadeIn 0.6s forwards; }
+        @keyframes fadeIn { to { opacity: 1; transform: translateY(0); } }
+
+        .result-card { 
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            transform: scale(0.95);
+            opacity: 0;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .result-card:hover {
+            transform: scale(1.03);
+            box-shadow: 0 0 25px rgba(37, 99, 235, 0.3);
+        }
+        @keyframes popIn { to { transform: scale(1); opacity: 1; } }
+
+        #d3-container { display: flex; justify-content: center; align-items: center; cursor: grab; overflow: hidden; background: rgba(0, 0, 0, 0.2); position: relative; }
+        #d3-container canvas { margin: 0 auto; display: block; }
+        
+        .measurement-value { font-variant-numeric: tabular-nums; }
+
+        #scanner-animation { stroke-dasharray: 1000; stroke-dashoffset: 1000; animation: draw 2s ease-in-out forwards; }
+        #scanner-line { animation: scan 2s ease-in-out forwards; }
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+        @keyframes scan { 0% { transform: translateY(-10%); } 100% { transform: translateY(110%); } }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div id="app-container" class="fitter-card w-full max-w-lg p-8 rounded-2xl transition-all duration-500">
+        
+        <div id="header" class="text-center mb-8 animated-entry">
+            <div class="flex items-center justify-center mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#59a6f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-3"><circle cx="6" cy="12" r="4"></circle><circle cx="18" cy="12" r="4"></circle><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+                <h1 class="text-3xl font-bold text-white">Lenskart AI Fitter</h1>
+            </div>
+            <p class="text-gray-400">Hyper-precise optical measurements, powered by AI.</p>
+        </div>
+        
+        <div id="error-message" class="hidden text-center p-3 rounded-lg mb-4 bg-red-900/70 border border-red-700 text-red-200 animated-entry"></div>
+        
+        <div id="input-section" class="space-y-6 animated-entry" style="animation-delay: 0.1s;">
+            <div>
+                <label class="block text-sm font-medium mb-2 text-gray-300">1. Upload Video (while wearing glasses)</label>
+                <div class="flex space-x-4">
+                    <label id="videoUploadLabel" for="videoUpload" class="custom-file-upload p-3 rounded-lg w-full flex flex-col items-center justify-center">
+                       <svg class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        <span id="videoUploadText" class="text-sm">Select Video</span>
+                    </label>
+                    <input id="videoUpload" type="file" accept="video/*"/>
+                </div>
+            </div>
+            <div>
+                <label for="frameWidth" class="block text-sm font-medium mb-2 text-gray-300">2. Enter Total Frame Width (mm)</label>
+                <input type="number" id="frameWidth" placeholder="e.g., 142" class="input-field w-full p-2.5 rounded-lg" value="142">
+            </div>
+            <div id="auto-analyze-area" class="pt-2">
+                <button id="analyze-button" onclick="analyzeAutomatically()" class="btn w-full flex items-center justify-center" disabled>
+                    Start AI Analysis
+                </button>
+            </div>
+        </div>
+
+        <div id="processing-section" class="hidden">
+             <div id="loading-state" class="text-center h-full flex flex-col justify-center items-center space-y-4 py-8">
+                <svg width="100" height="100" viewBox="-10 -20 120 140" class="w-24 h-24"><defs><mask id="mask"><rect x="-10" y="-20" width="120" height="140" fill="white"></rect><path d="M10,0 Q50, -15 90,0 T10,0" fill="black"/><path d="M10,100 Q50,115 90,100 T10,100" fill="black"/><circle cx="30" cy="40" r="10" fill="black"/><circle cx="70" cy="40" r="10" fill="black"/></mask></defs><path id="scanner-animation" d="M10,0 Q50, -15 90,0 T10,0 M10,100 Q50,115 90,100 T10,100 M20,40 A10,10 0 1,1 40,40 A10,10 0 1,1 20,40 M60,40 A10,10 0 1,1 80,40 A10,10 0 1,1 60,40" stroke="#59a6f1" stroke-width="2" fill="none" mask="url(#mask)"/><rect id="scanner-line" x="-10" y="0" width="120" height="2" fill="#59a6f1" style="transform: translateY(-10%);"/></svg>
+                <p class="text-lg text-gray-300 animated-entry" style="animation-delay: 0.5s;">Analyzing your biometrics...</p>
+            </div>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <div class="flex flex-col md:flex-row md:space-x-8">
+                <div class="md:w-2/5 flex flex-col">
+                    <h2 class="text-xl font-semibold text-center text-white mb-6">Analysis Complete</h2>
+                    <div class="grid grid-cols-2 gap-4 flex-grow">
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.1s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path></svg>Pupillary Distance</div>
+                            <p id="pdResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.2s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 17l-4 4m0 0l-4-4m4 4V3"></path></svg>Fitting Height</div>
+                            <p id="fhResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.3s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6H8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"></path></svg>Pantoscopic Tilt</div>
+                            <p id="tiltResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.4s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>Vertex Distance</div>
+                            <p id="vertexResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                    </div>
+                    <div class="text-center mt-8 animated-entry" style="animation-delay: 0.5s;"><button onclick="resetAll()" class="btn btn-secondary text-sm font-semibold px-6 py-2 rounded-lg">Start Over</button></div>
+                </div>
+                <div class="md:w-3/5 mt-8 md:mt-0">
+                     <div class="result-card rounded-lg p-4 text-center w-full h-full" style="animation-delay: 0s;">
+                         <p class="text-sm text-gray-400 mb-2">Interactive 3D Facial Model</p>
+                         <div id="d3-container" class="rounded-lg bg-black/20 w-full h-96"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const appContainer = document.getElementById('app-container');
+        const header = document.getElementById('header');
+        const inputSection = document.getElementById('input-section');
+        const processingSection = document.getElementById('processing-section');
+        const resultsSection = document.getElementById('results-section');
+        const d3Container = document.getElementById('d3-container');
+        const videoUpload = document.getElementById('videoUpload');
+        const videoUploadLabel = document.getElementById('videoUploadLabel');
+        const videoUploadText = document.getElementById('videoUploadText');
+        const frameWidthInput = document.getElementById('frameWidth'), errorMessage = document.getElementById('error-message');
+        const analyzeButton = document.getElementById('analyze-button');
+        const loadingState = document.getElementById('loading-state');
+        const pdResult = document.getElementById('pdResult'), fhResult = document.getElementById('fhResult'), tiltResult = document.getElementById('tiltResult'), vertexResult = document.getElementById('vertexResult');
+        let selectedFile = null, scene, camera, renderer, controls;
+        
+        // Event Listeners
+        videoUpload.addEventListener('change', handleVideoUpload);
+        frameWidthInput.addEventListener('input', updateAnalyzeButtonState);
+
+        // --- 3D Scene Setup ---
+        function init3DScene() {
+            scene = new THREE.Scene();
+            const containerBounds = d3Container.getBoundingClientRect();
+            camera = new THREE.PerspectiveCamera(50, containerBounds.width / containerBounds.height, 0.1, 1000);
+            camera.position.set(0, 0, 500);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 50, 100);
+            scene.add(directionalLight);
+
+            const grid = new THREE.GridHelper(400, 30, 0x2563eb, 0x444444);
+            grid.rotation.x = Math.PI / 2;
+            grid.position.z = -150;
+            scene.add(grid);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(containerBounds.width, containerBounds.height);
+            d3Container.innerHTML = '';
+            d3Container.appendChild(renderer.domElement);
+            
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 1.0;
+            controls.enablePan = false;
+            controls.target.set(0,0,0);
+
+            const animate = function () {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            };
+            animate();
+            
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            if (!renderer) return;
+            const containerBounds = d3Container.getBoundingClientRect();
+            camera.aspect = containerBounds.width / containerBounds.height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(containerBounds.width, containerBounds.height);
+        }
+        
+        // --- MODIFIED RENDER FUNCTION ---
+        function render3DModel(landmarks, frameDimensions) {
+            // Remove previous model if it exists
+            const oldModel = scene.getObjectByName("facePoints");
+            if (oldModel) {
+                scene.remove(oldModel);
+                oldModel.geometry.dispose();
+                oldModel.material.dispose();
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const aspectRatio = frameDimensions.width / frameDimensions.height;
+            
+            // Process landmarks into vertices
+            landmarks.forEach(lm => {
+                const x = lm[0] - 0.5;
+                const y = (lm[1] - 0.5) / aspectRatio;
+                const z = lm[2];
+                vertices.push(x, -y, -z);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            
+            // Use PointsMaterial for a "dotted" effect
+            const material = new THREE.PointsMaterial({
+                color: 0x59a6f1, // A nice blue color
+                size: 1.5,       // Adjust point size as needed
+                sizeAttenuation: true // Points get smaller farther away
+            });
+
+            // Create a Points object instead of a Mesh
+            const facePoints = new THREE.Points(geometry, material);
+            facePoints.name = "facePoints";
+
+            // Scaling logic
+            geometry.computeBoundingBox();
+            const boundingBox = geometry.boundingBox;
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+            const scale = 250 / size.length();
+            
+            facePoints.scale.set(0, 0, 0); // Start at scale 0 for animation
+            scene.add(facePoints);
+            
+            // Animate scale-in
+            let start = null;
+            const duration = 750;
+            const animateScale = (timestamp) => {
+                if (!start) start = timestamp;
+                const progress = timestamp - start;
+                const easedProgress = Math.min(progress / duration, 1);
+                const currentScale = scale * easedProgress;
+                facePoints.scale.set(currentScale, currentScale, currentScale);
+                if (progress < duration) {
+                    requestAnimationFrame(animateScale);
+                }
+            };
+            requestAnimationFrame(animateScale);
+
+            controls.reset();
+            controls.autoRotate = true;
+        }
+
+
+        function animateCounter(element, finalValue, unit, decimals = 2) {
+            const duration = 1500;
+            const startTime = performance.now();
+            function update(currentTime) {
+                const elapsedTime = currentTime - startTime;
+                if (elapsedTime >= duration) {
+                    element.textContent = `${finalValue.toFixed(decimals)} ${unit}`;
+                    return;
+                }
+                const currentValue = (elapsedTime / duration) * finalValue;
+                element.textContent = `${currentValue.toFixed(decimals)} ${unit}`;
+                requestAnimationFrame(update);
+            }
+            requestAnimationFrame(update);
+        }
+
+        function showSection(section) {
+            [inputSection, processingSection, resultsSection].forEach(s => s.classList.add('hidden'));
+            if(section) section.classList.remove('hidden');
+            const isWide = section === resultsSection;
+            if(isWide) { 
+                appContainer.classList.remove('max-w-lg');
+                appContainer.classList.add('max-w-6xl');
+            } else { 
+                appContainer.classList.remove('max-w-6xl');
+                appContainer.classList.add('max-w-lg'); 
+            }
+            if(section === resultsSection || section === processingSection) { 
+                header.classList.add('hidden'); 
+            } else { 
+                header.classList.remove('hidden'); 
+            }
+        }
+        
+        function handleVideoUpload(e) {
+            selectedFile = e.target.files[0];
+            if (!selectedFile) return;
+            videoUploadLabel.classList.add('selected');
+            videoUploadText.textContent = selectedFile.name.length > 20 ? selectedFile.name.substring(0, 17) + '...' : selectedFile.name;
+            updateAnalyzeButtonState();
+        }
+        
+        function resetUI() {
+            videoUpload.value = '';
+            videoUploadLabel.classList.remove('selected');
+            videoUploadText.textContent = 'Select Video';
+        }
+
+        function updateAnalyzeButtonState() {
+            analyzeButton.disabled = !(selectedFile && parseFloat(frameWidthInput.value) > 0);
+        }
+
+        async function analyzeAutomatically() {
+            if (!selectedFile || !parseFloat(frameWidthInput.value) > 0) {
+                showMessage('Please select a video and enter a valid frame width.', true);
+                return;
+            }
+            showSection(processingSection);
+            loadingState.classList.remove('hidden');
+            hideMessage();
+            const formData = new FormData();
+            formData.append('video', selectedFile);
+            // --- THIS IS THE FIX ---
+            // The key must match what the Flask backend expects: 'frame_width_mm'
+            formData.append('frame_width_mm', frameWidthInput.value); 
+            try {
+                const response = await fetch('http://127.0.0.1:5000/process_video', { method: 'POST', body: formData });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || 'Server error.');
+                }
+                const results = await response.json();
+                displayResults(results);
+            } catch (error) {
+                showMessage(`Analysis Failed: ${error.message}`, true);
+                showSection(inputSection);
+            }
+        }
+
+        function displayResults(results) {
+            console.log("Data received from backend:", results);
+            showSection(resultsSection);
+            const measurements = results.measurements;
+            animateCounter(pdResult, measurements.pd, "mm");
+            animateCounter(fhResult, measurements.fh, "mm");
+            animateCounter(tiltResult, measurements.tilt, "°", 0);
+            animateCounter(vertexResult, measurements.vertex, "mm", 0);
+            if (results.landmarks && results.frameDimensions) {
+                console.log("Attempting to render 3D model...");
+                if (!renderer) init3DScene();
+                render3DModel(results.landmarks, results.frameDimensions);
+                d3Container.parentElement.classList.remove('hidden');
+            } else {
+                d3Container.parentElement.classList.add('hidden');
+            }
+        }
+        
+        function showMessage(msg, isError = false) {
+            errorMessage.textContent = msg;
+            errorMessage.classList.remove('hidden');
+        }
+
+        function hideMessage() {
+            errorMessage.classList.add('hidden');
+        }
+        
+        function resetAll() {
+            showSection(inputSection);
+            selectedFile = null;
+            frameWidthInput.value = '142';
+            hideMessage();
+            resetUI();
+            updateAnalyzeButtonState();
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            showSection(inputSection);
+            updateAnalyzeButtonState();
+        });
+    </script>
+</body>
+</html>
+
+
+
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lenskart AI Fitter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0a0c10; background-image: radial-gradient(circle at top right, rgba(37, 99, 235, 0.15), transparent 40%), radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.1), transparent 50%); color: #e6edf3; }
+        .fitter-card { background: rgba(13, 17, 23, 0.7); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid rgba(48, 54, 61, 0.5); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); }
+        .btn { background-image: linear-gradient(to right, #2563eb, #59a6f1); border: none; color: white; padding: 0.8rem 1.6rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.1); }
+        .btn:hover:not(:disabled) { transform: translateY(-3px) scale(1.03); box-shadow: 0 7px 20px rgba(37, 99, 235, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.1); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; }
+        .input-field { background-color: #0d1117; border: 1px solid #30363d; color: #e6edf3; transition: all 0.2s ease-in-out; }
+        .input-field:focus { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2); outline: none; }
+        input[type="file"] { display: none; }
+        .custom-file-upload { background-color: #0d1117; border: 1px solid #30363d; color: #8b949e; transition: all 0.3s ease; cursor: pointer; }
+        .custom-file-upload.selected, .custom-file-upload:hover { border-color: #2563eb; color: #e6edf3; background-color: #161b22; transform: translateY(-2px); }
+        .animated-entry { opacity: 0; transform: translateY(20px); animation: fadeIn 0.6s forwards; }
+        @keyframes fadeIn { to { opacity: 1; transform: translateY(0); } }
+
+        .result-card { 
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            transform: scale(0.95);
+            opacity: 0;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .result-card:hover {
+            transform: scale(1.03);
+            box-shadow: 0 0 25px rgba(37, 99, 235, 0.3);
+        }
+        @keyframes popIn { to { transform: scale(1); opacity: 1; } }
+
+        #d3-container { display: flex; justify-content: center; align-items: center; cursor: grab; overflow: hidden; background: rgba(0, 0, 0, 0.2); position: relative; }
+        #d3-container canvas { margin: 0 auto; display: block; }
+        
+        .measurement-value { font-variant-numeric: tabular-nums; }
+
+        #scanner-animation { stroke-dasharray: 1000; stroke-dashoffset: 1000; animation: draw 2s ease-in-out forwards; }
+        #scanner-line { animation: scan 2s ease-in-out forwards; }
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+        @keyframes scan { 0% { transform: translateY(-10%); } 100% { transform: translateY(110%); } }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div id="app-container" class="fitter-card w-full max-w-lg p-8 rounded-2xl transition-all duration-500">
+        
+        <div id="header" class="text-center mb-8 animated-entry">
+            <div class="flex items-center justify-center mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#59a6f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-3"><circle cx="6" cy="12" r="4"></circle><circle cx="18" cy="12" r="4"></circle><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+                <h1 class="text-3xl font-bold text-white">Lenskart AI Fitter</h1>
+            </div>
+            <p class="text-gray-400">Hyper-precise optical measurements, powered by AI.</p>
+        </div>
+        
+        <div id="error-message" class="hidden text-center p-3 rounded-lg mb-4 bg-red-900/70 border border-red-700 text-red-200 animated-entry"></div>
+        
+        <div id="input-section" class="space-y-6 animated-entry" style="animation-delay: 0.1s;">
+            <div>
+                <label class="block text-sm font-medium mb-2 text-gray-300">1. Upload a short video looking at the camera</label>
+                <div class="flex space-x-4">
+                    <label id="videoUploadLabel" for="videoUpload" class="custom-file-upload p-3 rounded-lg w-full flex flex-col items-center justify-center">
+                       <svg class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        <span id="videoUploadText" class="text-sm">Select Video</span>
+                    </label>
+                    <input id="videoUpload" type="file" accept="video/*"/>
+                </div>
+            </div>
+            <div id="auto-analyze-area" class="pt-2">
+                <button id="analyze-button" onclick="analyzeAutomatically()" class="btn w-full flex items-center justify-center" disabled>
+                    Start AI Analysis
+                </button>
+            </div>
+        </div>
+
+        <div id="processing-section" class="hidden">
+             <div id="loading-state" class="text-center h-full flex flex-col justify-center items-center space-y-4 py-8">
+                <svg width="100" height="100" viewBox="-10 -20 120 140" class="w-24 h-24"><defs><mask id="mask"><rect x="-10" y="-20" width="120" height="140" fill="white"></rect><path d="M10,0 Q50, -15 90,0 T10,0" fill="black"/><path d="M10,100 Q50,115 90,100 T10,100" fill="black"/><circle cx="30" cy="40" r="10" fill="black"/><circle cx="70" cy="40" r="10" fill="black"/></mask></defs><path id="scanner-animation" d="M10,0 Q50, -15 90,0 T10,0 M10,100 Q50,115 90,100 T10,100 M20,40 A10,10 0 1,1 40,40 A10,10 0 1,1 20,40 M60,40 A10,10 0 1,1 80,40 A10,10 0 1,1 60,40" stroke="#59a6f1" stroke-width="2" fill="none" mask="url(#mask)"/><rect id="scanner-line" x="-10" y="0" width="120" height="2" fill="#59a6f1" style="transform: translateY(-10%);"/></svg>
+                <p class="text-lg text-gray-300 animated-entry" style="animation-delay: 0.5s;">Analyzing your biometrics...</p>
+            </div>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <div class="flex flex-col md:flex-row md:space-x-8">
+                <div class="md:w-2/5 flex flex-col">
+                    <h2 class="text-xl font-semibold text-center text-white mb-6">Analysis Complete</h2>
+                    <div class="grid grid-cols-2 gap-4 flex-grow">
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.1s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path></svg>Pupillary Distance</div>
+                            <p id="pdResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.2s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 17l-4 4m0 0l-4-4m4 4V3"></path></svg>Fitting Height</div>
+                            <p id="fhResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.3s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6H8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"></path></svg>Pantoscopic Tilt</div>
+                            <p id="tiltResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                        <div class="result-card rounded-lg p-4 text-center" style="animation-delay: 0.4s;">
+                            <div class="flex items-center justify-center text-sm text-gray-400 mb-2"><svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>Vertex Distance</div>
+                            <p id="vertexResult" class="text-2xl font-bold text-white measurement-value">-</p>
+                        </div>
+                    </div>
+                    <div class="text-center mt-8 animated-entry" style="animation-delay: 0.5s;"><button onclick="resetAll()" class="btn btn-secondary text-sm font-semibold px-6 py-2 rounded-lg">Start Over</button></div>
+                </div>
+                <div class="md:w-3/5 mt-8 md:mt-0">
+                     <div class="result-card rounded-lg p-4 text-center w-full h-full" style="animation-delay: 0s;">
+                         <p class="text-sm text-gray-400 mb-2">Interactive 3D Facial Model</p>
+                         <div id="d3-container" class="rounded-lg bg-black/20 w-full h-96"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const appContainer = document.getElementById('app-container');
+        const header = document.getElementById('header');
+        const inputSection = document.getElementById('input-section');
+        const processingSection = document.getElementById('processing-section');
+        const resultsSection = document.getElementById('results-section');
+        const d3Container = document.getElementById('d3-container');
+        const videoUpload = document.getElementById('videoUpload');
+        const videoUploadLabel = document.getElementById('videoUploadLabel');
+        const videoUploadText = document.getElementById('videoUploadText');
+        // MODIFIED: Removed frameWidthInput
+        const errorMessage = document.getElementById('error-message');
+        const analyzeButton = document.getElementById('analyze-button');
+        const loadingState = document.getElementById('loading-state');
+        const pdResult = document.getElementById('pdResult'), fhResult = document.getElementById('fhResult'), tiltResult = document.getElementById('tiltResult'), vertexResult = document.getElementById('vertexResult');
+        let selectedFile = null, scene, camera, renderer, controls;
+        
+        // Event Listeners
+        videoUpload.addEventListener('change', handleVideoUpload);
+        // DELETED: Removed event listener for frameWidthInput
+
+        // --- 3D Scene Setup ---
+        function init3DScene() {
+            scene = new THREE.Scene();
+            const containerBounds = d3Container.getBoundingClientRect();
+            camera = new THREE.PerspectiveCamera(50, containerBounds.width / containerBounds.height, 0.1, 1000);
+            camera.position.set(0, 0, 500);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 50, 100);
+            scene.add(directionalLight);
+
+            const grid = new THREE.GridHelper(400, 30, 0x2563eb, 0x444444);
+            grid.rotation.x = Math.PI / 2;
+            grid.position.z = -150;
+            scene.add(grid);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(containerBounds.width, containerBounds.height);
+            d3Container.innerHTML = '';
+            d3Container.appendChild(renderer.domElement);
+            
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 1.0;
+            controls.enablePan = false;
+            controls.target.set(0,0,0);
+
+            const animate = function () {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            };
+            animate();
+            
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            if (!renderer) return;
+            const containerBounds = d3Container.getBoundingClientRect();
+            camera.aspect = containerBounds.width / containerBounds.height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(containerBounds.width, containerBounds.height);
+        }
+        
+        function render3DModel(landmarks, frameDimensions) {
+            const oldModel = scene.getObjectByName("facePoints");
+            if (oldModel) {
+                scene.remove(oldModel);
+                oldModel.geometry.dispose();
+                oldModel.material.dispose();
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const aspectRatio = frameDimensions.width / frameDimensions.height;
+            
+            landmarks.forEach(lm => {
+                const x = lm[0] - 0.5;
+                const y = (lm[1] - 0.5) / aspectRatio;
+                const z = lm[2];
+                vertices.push(x, -y, -z);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            
+            const material = new THREE.PointsMaterial({
+                color: 0x59a6f1,
+                size: 1.5,
+                sizeAttenuation: true
+            });
+
+            const facePoints = new THREE.Points(geometry, material);
+            facePoints.name = "facePoints";
+
+            geometry.computeBoundingBox();
+            const boundingBox = geometry.boundingBox;
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+            const scale = 250 / size.length();
+            
+            facePoints.scale.set(0, 0, 0);
+            scene.add(facePoints);
+            
+            let start = null;
+            const duration = 750;
+            const animateScale = (timestamp) => {
+                if (!start) start = timestamp;
+                const progress = timestamp - start;
+                const easedProgress = Math.min(progress / duration, 1);
+                const currentScale = scale * easedProgress;
+                facePoints.scale.set(currentScale, currentScale, currentScale);
+                if (progress < duration) {
+                    requestAnimationFrame(animateScale);
+                }
+            };
+            requestAnimationFrame(animateScale);
+
+            controls.reset();
+            controls.autoRotate = true;
+        }
+
+        function animateCounter(element, finalValue, unit, decimals = 2) {
+            const duration = 1500;
+            const startTime = performance.now();
+            function update(currentTime) {
+                const elapsedTime = currentTime - startTime;
+                if (elapsedTime >= duration) {
+                    element.textContent = `${finalValue.toFixed(decimals)} ${unit}`;
+                    return;
+                }
+                const currentValue = (elapsedTime / duration) * finalValue;
+                element.textContent = `${currentValue.toFixed(decimals)} ${unit}`;
+                requestAnimationFrame(update);
+            }
+            requestAnimationFrame(update);
+        }
+
+        function showSection(section) {
+            [inputSection, processingSection, resultsSection].forEach(s => s.classList.add('hidden'));
+            if(section) section.classList.remove('hidden');
+            const isWide = section === resultsSection;
+            if(isWide) { 
+                appContainer.classList.remove('max-w-lg');
+                appContainer.classList.add('max-w-6xl');
+            } else { 
+                appContainer.classList.remove('max-w-6xl');
+                appContainer.classList.add('max-w-lg'); 
+            }
+            if(section === resultsSection || section === processingSection) { 
+                header.classList.add('hidden'); 
+            } else { 
+                header.classList.remove('hidden'); 
+            }
+        }
+        
+        function handleVideoUpload(e) {
+            selectedFile = e.target.files[0];
+            if (!selectedFile) return;
+            videoUploadLabel.classList.add('selected');
+            videoUploadText.textContent = selectedFile.name.length > 20 ? selectedFile.name.substring(0, 17) + '...' : selectedFile.name;
+            updateAnalyzeButtonState();
+        }
+        
+        function resetUI() {
+            videoUpload.value = '';
+            videoUploadLabel.classList.remove('selected');
+            videoUploadText.textContent = 'Select Video';
+        }
+
+        // MODIFIED: Simplified the button state logic
+        function updateAnalyzeButtonState() {
+            analyzeButton.disabled = !selectedFile;
+        }
+
+        // MODIFIED: Simplified the analysis function
+        async function analyzeAutomatically() {
+            if (!selectedFile) {
+                showMessage('Please select a video file.', true);
+                return;
+            }
+            showSection(processingSection);
+            loadingState.classList.remove('hidden');
+            hideMessage();
+            const formData = new FormData();
+            formData.append('video', selectedFile);
+            // DELETED: formData.append('frameWidth', ...) line removed
+            try {
+                const response = await fetch('http://127.0.0.1:5000/process_video', { method: 'POST', body: formData });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || 'Server error.');
+                }
+                const results = await response.json();
+                displayResults(results);
+            } catch (error) {
+                showMessage(`Analysis Failed: ${error.message}`, true);
+                showSection(inputSection);
+            }
+        }
+
+        function displayResults(results) {
+            console.log("Data received from backend:", results);
+            showSection(resultsSection);
+            const measurements = results.measurements;
+            animateCounter(pdResult, measurements.pd, "mm");
+            animateCounter(fhResult, measurements.fh, "mm");
+            animateCounter(tiltResult, measurements.tilt, "°", 0);
+            animateCounter(vertexResult, measurements.vertex, "mm", 0);
+            if (results.landmarks && results.frameDimensions) {
+                console.log("Attempting to render 3D model...");
+                if (!renderer) init3DScene();
+                render3DModel(results.landmarks, results.frameDimensions);
+                d3Container.parentElement.classList.remove('hidden');
+            } else {
+                d3Container.parentElement.classList.add('hidden');
+            }
+        }
+        
+        function showMessage(msg, isError = false) {
+            errorMessage.textContent = msg;
+            errorMessage.classList.remove('hidden');
+        }
+
+        function hideMessage() {
+            errorMessage.classList.add('hidden');
+        }
+        
+        // MODIFIED: Simplified the reset function
+        function resetAll() {
+            showSection(inputSection);
+            selectedFile = null;
+            // DELETED: frameWidthInput.value reset line removed
+            hideMessage();
+            resetUI();
+            updateAnalyzeButtonState();
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            showSection(inputSection);
+            updateAnalyzeButtonState();
+        });
+    </script>
+</body>
+</html> -->
